@@ -1,108 +1,78 @@
-#include <stdio.h>
 #include "freertos/FreeRTOS.h"
-#include "driver/gpio.h"
+#include "esp_adc/adc_oneshot.h"
 
-#define D_SEAT GPIO_NUM_4
-#define P_SEAT GPIO_NUM_5
-#define D_SEATBELT GPIO_NUM_6
-#define P_SEATBELT GPIO_NUM_7
 
-#define GREEN GPIO_NUM_9
-#define RED GPIO_NUM_10
+#define ADC_CHANNEL     ADC_CHANNEL_4
+#define ADC_ATTEN       ADC_ATTEN_DB_12
+#define BITWIDTH        ADC_BITWIDTH_12
+#define DELAY_MS        10                  // Loop delay (ms)
+#define NUM_SAMPLES     1000                // Number of samples
+#define BUF_SIZE        16                  // Number of points to average
 
-#define BUZZER GPIO_NUM_11
-#define IGNITION GPIO_NUM_12
 
-void delay_ms(int t);
-#define LOOP_DELAY_MS 25
 void app_main(void)
 {
-    gpio_reset_pin(D_SEAT);
-    gpio_set_direction(D_SEAT, GPIO_MODE_INPUT);
-    gpio_pullup_en(D_SEAT);
-
-    gpio_reset_pin(P_SEAT);
-    gpio_set_direction(P_SEAT, GPIO_MODE_INPUT);
-    gpio_pullup_en(P_SEAT);
-
-    gpio_reset_pin(D_SEATBELT);
-    gpio_set_direction(D_SEATBELT, GPIO_MODE_INPUT);
-    gpio_pullup_en(D_SEATBELT);
-
-    gpio_reset_pin(P_SEATBELT);
-    gpio_set_direction(P_SEATBELT, GPIO_MODE_INPUT);
-    gpio_pullup_en(P_SEATBELT);
-
-    gpio_reset_pin(IGNITION);
-    gpio_set_direction(IGNITION, GPIO_MODE_INPUT);
-    gpio_pullup_en(IGNITION);
-
-    gpio_reset_pin(BUZZER);
-    gpio_set_direction(BUZZER, GPIO_MODE_OUTPUT);
-    gpio_set_level(BUZZER, 0);
-
-    gpio_reset_pin(GREEN);
-    gpio_set_direction(GREEN, GPIO_MODE_OUTPUT);
-    gpio_set_level(GREEN,0);
-
-    gpio_reset_pin(RED);
-    gpio_set_direction(RED, GPIO_MODE_OUTPUT);
-    gpio_set_level(RED,0);
-
-    bool d_seat, p_seat, d_belt, p_belt, ignit;
-    bool green_enabled = false;
-
-    //flags
-    bool welcome_not_shown = true; 
-    bool ignition_used = false; //not used yet
-
-    while(1){
-        
-        d_seat = (gpio_get_level(D_SEAT) == 0);
-        p_seat = (gpio_get_level(P_SEAT) == 0);
-        d_belt = (gpio_get_level(D_SEATBELT) == 0);
-        p_belt = (gpio_get_level(P_SEATBELT) == 0);
-        ignit = (gpio_get_level(IGNITION) == 0);
-
-        if (d_seat && welcome_not_shown) {
-             printf("Welcome to enhanced alarm system model 218-W25\n");
-             welcome_not_shown = false;
-        }
-        // Ignition enabled
-        if (d_seat && p_seat && d_belt && p_belt && !ignition_used ){
-            gpio_set_level(GREEN,1);
-            green_enabled = true;
-        }
-        else {
-            gpio_set_level(GREEN,0);
-            green_enabled = false;
+   
+    adc_oneshot_unit_init_cfg_t init_config1 = {
+        .unit_id = ADC_UNIT_1,
+    };                                                  // Unit configuration
+    adc_oneshot_unit_handle_t adc1_handle;              // Unit handle
+    adc_oneshot_new_unit(&init_config1, &adc1_handle);  // Populate unit handle
+   
+    adc_oneshot_chan_cfg_t config = {
+        .atten = ADC_ATTEN,
+        .bitwidth = BITWIDTH
+    };                                                  // Channel config
+    adc_oneshot_config_channel                          // Configure the chan
+    (adc1_handle, ADC_CHANNEL, &config);
+   
+    adc_cali_curve_fitting_config_t cali_config = {
+        .unit_id = ADC_UNIT_1,
+        .chan = ADC_CHANNEL,
+        .atten = ADC_ATTEN,
+        .bitwidth = BITWIDTH
+    };                                                  // Calibration config
+    adc_cali_handle_t adc1_cali_chan_handle;            // Calibration handle
+    adc_cali_create_scheme_curve_fitting                // Populate cal handle
+    (&cali_config, &adc1_cali_chan_handle);
+   
+    int index = 0;                      // Index of newest entry into buffer
+    int buffer[BUF_SIZE] = {0};         // Circular buffer of mV readings (mV)
+   
+    for (int i = 0; i < NUM_SAMPLES; i++) {             // Loop for NUM_SAMPLES
+       
+        int adc_bits;                                   // ADC reading (bits)
+        adc_oneshot_read
+        (adc1_handle, ADC_CHANNEL, &adc_bits);          // Read ADC bits
+       
+        int adc_mv;                                     // ADC reading (mV)
+        adc_cali_raw_to_voltage
+        (adc1_cali_chan_handle, adc_bits, &adc_mv);     // Convert to mV
+       
+        buffer[index] = adc_mv;                         // Store mV reading
+        index = (index + 1) % BUF_SIZE;                 // Increment and wrap
+       
+        int mv_filt = 0;                                // Sum of data (mV)
+       
+        int navg;                       // Number of points to average
+        if (i < BUF_SIZE){              // Until the buffer is full
+            navg = i + 1;               // only average the number read so far.
+        } else {                        // Otherwise,
+            navg = BUF_SIZE;            // use the full buffer.
         }
 
-        //Ignition pressed
-        if (ignit && !ignition_used){
-            ignition_used = true;
-            if (green_enabled){
-                gpio_set_level(GREEN,0);
-                gpio_set_level(RED,1);
-                printf("Engine started\n");
-            }
-            else {
-                printf("Ignition inhibited\n");
-                gpio_set_level(BUZZER, 1);
 
-                if (!d_seat)
-                    printf("Driver seat not occupied\n");
-                if (!p_seat)
-                    printf("Passenger seat not occupied\n");
-                if (!d_belt)
-                    printf("Driver's seatbelt not fastened\n");
-                if (!p_belt)
-                    printf("Passenger's seatbelt not fastened\n");
-            }
+        for (int j = 0; j < navg; j++) {            // Loop through buffer
+             mv_filt = mv_filt + buffer[j];         // summing the data
         }
-        delay_ms(25);
+       
+        mv_filt = mv_filt / navg;                   // Compute average (mV)
+       
+        int time_ms = i * DELAY_MS;                 // Loop time (ms)
+       
+        printf("%d %d %d\n", time_ms, adc_mv, mv_filt);
+       
+        vTaskDelay(pdMS_TO_TICKS(DELAY_MS));
     }
-}
-void delay_ms(int t) {
-    vTaskDelay(t /portTICK_PERIOD_MS);
+   
 }
