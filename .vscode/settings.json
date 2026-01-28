@@ -1,0 +1,13 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.espIdfPath": "/Users/vivaangupta/esp/esp-idf",
+  "idf.pythonInstallPath": "/Users/vivaangupta/.espressif/python_env/idf6.1_py3.12_env/bin/python3",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-builtin.cfg"
+  ],
+  "idf.port": "/dev/tty.Bluetooth-Incoming-Port",
+  "idf.toolsPath": "/Users/vivaangupta/.espressif",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  }
+}
