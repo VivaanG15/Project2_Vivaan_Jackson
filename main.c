@@ -8,7 +8,7 @@
 #define DELAY_MS        10                  // Loop delay (ms)
 #define NUM_SAMPLES     1000                // Number of samples
 #define BUF_SIZE        16                  // Number of points to average
-
+//test
 
 void app_main(void)
 {
